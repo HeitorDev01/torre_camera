@@ -8,8 +8,9 @@ cor_baixa = None
 cor_alta = None
 hsv_atual = None
 
-lock_frames = 0          # frames seguidos com alvo à vista
-LIMIAR_LOCK = 15         # quantos frames pra considerar "travado"
+lock_frames = 0
+LIMIAR_LOCK = 15
+suave_cx, suave_cy = None, None   # posição suavizada da mira
 
 def escolher_cor(event, x, y, flags, param):
     global cor_baixa, cor_alta
@@ -22,37 +23,35 @@ def escolher_cor(event, x, y, flags, param):
 cv2.namedWindow("Mira")
 cv2.setMouseCallback("Mira", escolher_cor)
 
-def desenhar_mira(frame, cx, cy, progresso, travado, t):
-    cor = (0, 0, 255) if travado else (0, 210, 255)   # vermelho / amarelo
+def desenhar_mira(frame, cx, cy, raio, progresso, travado, t):
+    cor = (0, 0, 255) if travado else (0, 210, 255)
 
-    # anel externo girando (dá o "vida")
-    raio = 40
+    # anel externo girando
     for i in range(12):
         a = t * 2.0 + i * (2 * np.pi / 12)
-        x1 = int(cx + raio * np.cos(a));       y1 = int(cy + raio * np.sin(a))
-        x2 = int(cx + (raio + 8) * np.cos(a)); y2 = int(cy + (raio + 8) * np.sin(a))
+        x1 = int(cx + raio * np.cos(a));        y1 = int(cy + raio * np.sin(a))
+        x2 = int(cx + (raio + 8) * np.cos(a));  y2 = int(cy + (raio + 8) * np.sin(a))
         cv2.line(frame, (x1, y1), (x2, y2), cor, 1)
 
-    # cantos em L que FECHAM conforme trava
-    s = int(70 - 15 * progresso)
-    b = 18
+    # cantos em L que acompanham o tamanho do alvo e fecham ao travar
+    s = int(raio + 25 - 15 * progresso)
+    b = max(12, raio // 3)
     for sx, sy in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
         x, y = cx + sx * s, cy + sy * s
         cv2.line(frame, (x, y), (x - sx * b, y), cor, 2)
         cv2.line(frame, (x, y), (x, y - sy * b), cor, 2)
 
-    cv2.circle(frame, (cx, cy), 28, cor, 2)
-    cv2.circle(frame, (cx, cy), 16, cor, 1)
-    L = 40
+    cv2.circle(frame, (cx, cy), int(raio * 0.7), cor, 2)
+    cv2.circle(frame, (cx, cy), int(raio * 0.4), cor, 1)
+    L = raio
     cv2.line(frame, (cx - L, cy), (cx - 10, cy), cor, 2)
     cv2.line(frame, (cx + 10, cy), (cx + L, cy), cor, 2)
     cv2.line(frame, (cx, cy - L), (cx, cy - 10), cor, 2)
     cv2.line(frame, (cx, cy + 10), (cx, cy + L), cor, 2)
     cv2.circle(frame, (cx, cy), 3, cor, -1)
 
-    # anel pulsando quando travado
     if travado:
-        p = int(30 + 18 * abs(np.sin(t * 4)))
+        p = int(raio + 18 * abs(np.sin(t * 4)))
         cv2.circle(frame, (cx, cy), p, (0, 0, 255), 1)
 
 def barra_status(frame, texto, cor):
@@ -78,10 +77,19 @@ while True:
                 achou = True
                 x, y, w, h = cv2.boundingRect(maior)
                 cx, cy = x + w // 2, y + h // 2
+                raio = max(25, int(max(w, h) * 0.6))
+
+                # suaviza a posição (desliza em vez de pular)
+                if suave_cx is None:
+                    suave_cx, suave_cy = cx, cy
+                else:
+                    suave_cx = int(suave_cx * 0.6 + cx * 0.4)
+                    suave_cy = int(suave_cy * 0.6 + cy * 0.4)
+
                 lock_frames = min(lock_frames + 1, LIMIAR_LOCK)
                 progresso = lock_frames / LIMIAR_LOCK
                 travado = lock_frames >= LIMIAR_LOCK
-                desenhar_mira(frame, cx, cy, progresso, travado, t)
+                desenhar_mira(frame, suave_cx, suave_cy, raio, progresso, travado, t)
                 if travado:
                     barra_status(frame, f"ALVO TRAVADO  ({cx},{cy})", (0, 0, 255))
                 else:
