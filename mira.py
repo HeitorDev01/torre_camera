@@ -64,12 +64,18 @@ while True:
             suave_cy = int(suave_cy * 0.6 + cy * 0.4)
         desenhar_mira(frame, suave_cx, suave_cy, raio, t)
         barra_status(frame, f"ALVO AUTOMATICO  ({cx},{cy})", (0, 0, 255))
+    elif suave_cx is not None:                   # alvo parou: mantém a mira na última posição
+        desenhar_mira(frame, suave_cx, suave_cy, raio, t)
+        barra_status(frame, f"ALVO PARADO  ({suave_cx},{suave_cy})", (0, 0, 255))
     else:
         barra_status(frame, "VARRENDO - nenhum movimento", (0, 210, 255))
 
     cv2.imshow("Mira automatica", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    tecla = cv2.waitKey(1) & 0xFF
+    if tecla == ord('q'):
         break
+    if tecla == ord('r'):                        # solta o alvo e volta a varrer
+        suave_cx, suave_cy = None, None
 
 cam.release()
 cv2.destroyAllWindows()
