@@ -4,17 +4,10 @@ import time
 
 cam = cv2.VideoCapture(0)
 
-# escolhe o melhor rastreador disponível
-def criar_tracker():
-    for nome in ['TrackerCSRT_create', 'TrackerKCF_create', 'TrackerMIL_create']:
-        if hasattr(cv2, nome):
-            return getattr(cv2, nome)()
-        if hasattr(cv2, 'legacy') and hasattr(cv2.legacy, nome):
-            return getattr(cv2.legacy, nome)()
-    raise RuntimeError("Nenhum tracker disponivel")
+# detector de fundo: aprende o que é "parado" e destaca o que se mexe
+fundo = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=40, detectShadows=False)
 
-tracker = None
-rastreando = False
+suave_cx, suave_cy = None, None
 
 def desenhar_mira(frame, cx, cy, raio, t):
     cor = (0, 0, 255)
@@ -43,37 +36,40 @@ def barra_status(frame, texto, cor):
     cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (0, 0, 0), -1)
     cv2.putText(frame, texto, (12, 27), cv2.FONT_HERSHEY_SIMPLEX, 0.7, cor, 2)
 
-print("Aperte S pra marcar o alvo | Q pra sair")
-
 while True:
     ok, frame = cam.read()
     if not ok:
         break
     t = time.time()
 
-    if rastreando:
-        sucesso, caixa = tracker.update(frame)
-        if sucesso:
-            x, y, w, h = [int(v) for v in caixa]
-            cx, cy = x + w // 2, y + h // 2
-            raio = max(25, int(max(w, h) * 0.6))
-            desenhar_mira(frame, cx, cy, raio, t)
-            barra_status(frame, f"ALVO TRAVADO  ({cx},{cy})", (0, 0, 255))
-        else:
-            barra_status(frame, "ALVO PERDIDO - aperte S pra remarcar", (0, 210, 255))
-    else:
-        barra_status(frame, "Aperte S pra marcar o alvo", (0, 210, 255))
+    mascara = fundo.apply(frame)                 # o que mudou em relação ao fundo
+    mascara = cv2.erode(mascara, None, iterations=2)
+    mascara = cv2.dilate(mascara, None, iterations=4)
+    contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    cv2.imshow("Mira", frame)
-    k = cv2.waitKey(1) & 0xFF
-    if k == ord('q'):
+    alvo = None
+    if contornos:
+        maior = max(contornos, key=cv2.contourArea)
+        if cv2.contourArea(maior) > 800:         # ignora movimentos pequenos
+            alvo = cv2.boundingRect(maior)
+
+    if alvo is not None:
+        x, y, w, h = alvo
+        cx, cy = x + w // 2, y + h // 2
+        raio = max(25, int(max(w, h) * 0.6))
+        if suave_cx is None:
+            suave_cx, suave_cy = cx, cy
+        else:
+            suave_cx = int(suave_cx * 0.6 + cx * 0.4)
+            suave_cy = int(suave_cy * 0.6 + cy * 0.4)
+        desenhar_mira(frame, suave_cx, suave_cy, raio, t)
+        barra_status(frame, f"ALVO AUTOMATICO  ({cx},{cy})", (0, 0, 255))
+    else:
+        barra_status(frame, "VARRENDO - nenhum movimento", (0, 210, 255))
+
+    cv2.imshow("Mira automatica", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
         break
-    if k == ord('s'):
-        caixa = cv2.selectROI("Mira", frame, False)
-        if caixa[2] > 0 and caixa[3] > 0:
-            tracker = criar_tracker()
-            tracker.init(frame, caixa)
-            rastreando = True
 
 cam.release()
 cv2.destroyAllWindows()
